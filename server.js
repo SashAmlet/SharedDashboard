@@ -10,6 +10,9 @@ app.use(express.static('public')); // as if we are saying that everything in the
 console.log("Global socket server is running on port " + rootServerPort);
 
 
+
+var canvasData = {}; // Объект для хранения состояния конваса
+
 var socket = require('socket.io');
 
 var io = socket(rootServer);
@@ -20,14 +23,27 @@ function newConnection(socket){
     console.log('new connection: ' + socket.id);
 
     socket.on('joinSubServer', (subServerName) => {
-        // Checking the existence of a room with the same name
-        if (!io.sockets.adapter.rooms.has(subServerName)) {
-            // Creating a new room if it doesn't exist
-            socket.join(subServerName);
-            console.log('Subserver "' + subServerName + '" is created.');
-        } else {
-            // Joining an existing room
-            socket.join(subServerName);
+        // Получаем список комнат, к которым присоединен сокет
+        const rooms = socket.adapter.sids.get(socket.id);
+        console.log(rooms);
+
+        // Удаляем сокет из всех комнат, к которым он был присоединен
+        rooms.forEach((room) => {
+            if (room !== socket.id){
+                socket.leave(room);
+                console.log(room);
+
+            }
+        });
+        // Joining the room
+        socket.join(subServerName);
+        console.log('Joining an "' + subServerName + '" room.');
+        // Sending convas status to a new user
+        if (canvasData[subServerName]) {
+            socket.emit('syncCanvas', canvasData[subServerName]);
+        }
+        else{
+            socket.emit('syncCanvas', []);
         }
     });
 
@@ -35,10 +51,26 @@ function newConnection(socket){
 
     function mouseMsg(data){
         // this means that someone is currently drawing, so we need to send information to all other clients to update the dashboard.
-        console.log(data);
+        console.log('Receive and send: ' + data.x + ' ' + data.y + ' ' + data.subServerName);
+
+        // Saving a drawing action to the server
+        const { x, y, subServerName } = data;
+        if (!canvasData[subServerName]) {
+            canvasData[subServerName] = [];
+        }
+        canvasData[subServerName].push({ x, y });
+
         // Forward drawing data to all users in the room
-        io.to(data.subServerName).emit('mouse', data);
+        socket.to(subServerName).emit('mouse', data);
+        // io.to(data.subServerName).emit('mouse', data);
+
+
         // socket.broadcast.emit('mouse', data);
         // io.sockets.emit('mouse', data)
     }
+
+    socket.on('clearCanvas', (subServerName)=>{
+        canvasData[subServerName] = [];
+        io.to(subServerName).emit('clearCanvas');
+    });
 }
